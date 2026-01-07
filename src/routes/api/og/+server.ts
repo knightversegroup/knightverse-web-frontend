@@ -1,50 +1,46 @@
-import { Resvg } from '@resvg/resvg-js';
+import { Resvg, initWasm } from '@resvg/resvg-wasm';
 import satori from 'satori';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import type { RequestHandler } from './$types';
 
-// Load IBM Plex Sans Thai font - full TTF with all characters
-function loadFont(): ArrayBuffer {
-	const fontPath = join(process.cwd(), 'static', 'IBMPlexSansThai-Medium.ttf');
-	const fontBuffer = readFileSync(fontPath);
-	return fontBuffer.buffer.slice(fontBuffer.byteOffset, fontBuffer.byteOffset + fontBuffer.byteLength);
-}
+// @ts-expect-error - importing wasm file
+import resvgWasm from '@resvg/resvg-wasm/index_bg.wasm?url';
 
-// Load logo SVG and convert to data URL
-function loadLogoDataUrl(): string {
-	const logoPath = join(process.cwd(), 'src', 'lib', 'assets', 'logo-w.svg');
-	const logoSvg = readFileSync(logoPath, 'utf-8');
-	const base64 = Buffer.from(logoSvg).toString('base64');
-	return `data:image/svg+xml;base64,${base64}`;
-}
+let wasmInitialized = false;
 
-// Load background image and convert to data URL
-function loadBackgroundDataUrl(): string {
-	const bgPath = join(process.cwd(), 'static', 'og_b.png');
-	const bgBuffer = readFileSync(bgPath);
-	const base64 = bgBuffer.toString('base64');
-	return `data:image/png;base64,${base64}`;
-}
+export const GET: RequestHandler = async ({ url, fetch, platform }) => {
+	// Initialize WASM if not already done
+	if (!wasmInitialized) {
+		try {
+			const wasmResponse = await fetch(resvgWasm);
+			const wasmBuffer = await wasmResponse.arrayBuffer();
+			await initWasm(wasmBuffer);
+			wasmInitialized = true;
+		} catch (e) {
+			// WASM might already be initialized
+			wasmInitialized = true;
+		}
+	}
 
-export const GET: RequestHandler = async ({ url }) => {
 	// Get title parameter
 	const title = url.searchParams.get('title') || 'KnightVerse Group';
 
-	// Load font, logo, and background
-	let fontData: ArrayBuffer;
-	let logoDataUrl: string;
-	let bgDataUrl: string;
-	try {
-		fontData = loadFont();
-		logoDataUrl = loadLogoDataUrl();
-		bgDataUrl = loadBackgroundDataUrl();
-	} catch (error) {
-		console.error('Failed to load resources:', error);
-		throw new Error('Failed to load resources');
-	}
+	// Load font from static assets
+	const fontResponse = await fetch('/IBMPlexSansThai-Medium.ttf');
+	const fontData = await fontResponse.arrayBuffer();
 
-	// Generate SVG with satori using React-like element objects
+	// Load logo SVG
+	const logoResponse = await fetch('/logo-w.svg');
+	const logoSvg = await logoResponse.text();
+	const logoBase64 = btoa(logoSvg);
+	const logoDataUrl = `data:image/svg+xml;base64,${logoBase64}`;
+
+	// Load background image
+	const bgResponse = await fetch('/og_b.png');
+	const bgBuffer = await bgResponse.arrayBuffer();
+	const bgBase64 = btoa(String.fromCharCode(...new Uint8Array(bgBuffer)));
+	const bgDataUrl = `data:image/png;base64,${bgBase64}`;
+
+	// Generate SVG with satori
 	const svg = await satori(
 		{
 			type: 'div',
@@ -58,7 +54,6 @@ export const GET: RequestHandler = async ({ url }) => {
 					fontFamily: 'IBM Plex Sans Thai'
 				},
 				children: [
-					// Background image
 					{
 						type: 'img',
 						props: {
@@ -73,7 +68,6 @@ export const GET: RequestHandler = async ({ url }) => {
 							}
 						}
 					},
-					// Content overlay
 					{
 						type: 'div',
 						props: {
